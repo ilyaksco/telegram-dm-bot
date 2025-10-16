@@ -1,0 +1,16 @@
+# Berkas sensitif yang berisi kredensial
+.env
+
+# Hasil kompilasi/build dari Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Direktori dependensi (jika menggunakan Go Modules vendor)
+/vendor/
+
+# Berkas sistem operasi
+.DS_Store
+Thumbs.db

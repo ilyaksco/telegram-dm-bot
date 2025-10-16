@@ -1,0 +1,14 @@
+{
+    "start_message": "👋 Selamat Datang!\n\nSaya adalah asisten balas otomatis untuk Direct Messages channel Anda.\n\n**Untuk memulai dengan channel baru:**\n1. Tambahkan saya ke channel Anda sebagai Admin.\n2. Ajari saya untuk pertama kalinya menggunakan: `/learn @username_channel <pemicu> <jawaban>`\n\nSetelah sebuah channel dikenali, Anda cukup gunakan perintah interaktif `/learn` untuk mengelolanya dengan mudah.",
+    "learn_no_channels_found": "Saya belum mengenali channel di mana Anda adalah seorang admin.\n\nUntuk mendaftarkan channel baru, silakan ajari saya untuk pertama kalinya menggunakan perintah lengkap di chat ini:\n`/learn @username_channel_anda <pemicu> <jawaban>`",
+    "lang_prompt": "Silakan pilih bahasa yang Anda inginkan:",
+    "lang_updated": "✅ Bahasa telah diperbarui ke Indonesia.",
+    "cancel_message": "✅ Operasi dibatalkan.",
+    "cancel_fail": "Tidak ada operasi aktif untuk dibatalkan.",
+    "learn_success": "✅ Berhasil mempelajari respon baru untuk pemicu: `{{.Trigger}}`",
+    "learn_awaiting_response": "✅ Pemicu diterima: `{{.Trigger}}`\n\nSekarang, tulis pesan balasannya.\nAnda bisa menggunakan format *Markdown* dan placeholder yang dijelaskan di bawah.",
+    "placeholder_button": "Panduan Placeholder & Format",
+    "placeholder_help_text": "📚 **Panduan Placeholder & Format**\n\n**Placeholder Tersedia:**\n`{{user_first_name}}` - Menyisipkan nama depan pengguna.\n\n**Format Markdown:**\n`*teks tebal*` → **teks tebal**\n`_teks miring_` → *teks miring*\n`[Teks Link](https://contoh.com)` → sebuah tautan.",
+    "back_button": "⬅️ Kembali",
+    "unauthorized": "🚫 Anda tidak diizinkan menggunakan perintah ini."
+  }
