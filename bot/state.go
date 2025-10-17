@@ -5,9 +5,11 @@ import (
 )
 
 type UserState struct {
-	Step      string // "awaiting_trigger", "awaiting_response"
-	ChannelID int64
-	Trigger   string
+	Step         string // "awaiting_trigger", "awaiting_response_type", "awaiting_text", "awaiting_sticker", dll.
+	ChannelID    int64
+	ChannelTitle string
+	Trigger      string
+	ResponseType string
 }
 
 type StateManager struct {

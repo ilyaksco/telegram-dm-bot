@@ -15,6 +15,12 @@ type Message struct {
 	Chat                Chat                `json:"chat"`
 	Date                int                 `json:"date"`
 	Text                string              `json:"text"`
+	Caption             string              `json:"caption,omitempty"` // <-- TAMBAHKAN INI
+	Photo               []*PhotoSize        `json:"photo,omitempty"` // Tambahkan ini
+	Sticker             *Sticker            `json:"sticker,omitempty"`
+	Document            *Document           `json:"document,omitempty"`
+	Animation           *Animation          `json:"animation,omitempty"`
+	Audio               *Audio              `json:"audio,omitempty"`
 	DirectMessagesTopic DirectMessagesTopic `json:"direct_messages_topic,omitempty"`
 }
 
@@ -99,4 +105,60 @@ type AnswerCallbackQueryPayload struct {
 	CallbackQueryID string `json:"callback_query_id"`
 	Text            string `json:"text,omitempty"`
 	ShowAlert       bool   `json:"show_alert,omitempty"`
+}
+
+type Sticker struct {
+	FileID string `json:"file_id"`
+}
+
+type Document struct {
+	FileID string `json:"file_id"`
+}
+
+type Animation struct { // Untuk GIF
+	FileID string `json:"file_id"`
+}
+
+type Audio struct {
+	FileID string `json:"file_id"`
+}
+
+type SendStickerPayload struct {
+	ChatID                int64  `json:"chat_id"`
+	Sticker               string `json:"sticker"`
+	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
+}
+
+type SendDocumentPayload struct {
+	ChatID                int64  `json:"chat_id"`
+	Document              string `json:"document"`
+	Caption               string `json:"caption,omitempty"`
+	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
+}
+
+type SendAnimationPayload struct {
+	ChatID                int64  `json:"chat_id"`
+	Animation             string `json:"animation"`
+	Caption               string `json:"caption,omitempty"`
+	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
+}
+
+type SendAudioPayload struct {
+	ChatID                int64  `json:"chat_id"`
+	Audio                 string `json:"audio"`
+	Caption               string `json:"caption,omitempty"`
+	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
+}
+
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	FileSize int    `json:"file_size"`
+}
+
+type SendPhotoPayload struct {
+	ChatID                int64  `json:"chat_id"`
+	Photo                 string `json:"photo"`
+	Caption               string `json:"caption,omitempty"`
+	ParseMode             string `json:"parse_mode,omitempty"`
+	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
 }

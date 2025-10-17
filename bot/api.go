@@ -27,6 +27,64 @@ func NewAPI(token string) *API {
 	}
 }
 
+func (a *API) sendPostRequest(method string, payload interface{}) error {
+	url := fmt.Sprintf("%s/%s", a.baseURL, method)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal %s payload: %w", method, err)
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create new request for %s: %w", method, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send %s request: %w", method, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("received non-ok status code on %s (%d): %s", method, resp.StatusCode, string(body))
+	}
+	log.Printf("successfully sent %s", method)
+	return nil
+}
+
+func (a *API) SendMessage(payload SendMessagePayload) error {
+	return a.sendPostRequest("sendMessage", payload)
+}
+
+func (a *API) SendSticker(payload SendStickerPayload) error {
+	return a.sendPostRequest("sendSticker", payload)
+}
+
+func (a *API) SendDocument(payload SendDocumentPayload) error {
+	return a.sendPostRequest("sendDocument", payload)
+}
+
+func (a *API) SendAnimation(payload SendAnimationPayload) error {
+	return a.sendPostRequest("sendAnimation", payload)
+}
+
+func (a *API) SendAudio(payload SendAudioPayload) error {
+	return a.sendPostRequest("sendAudio", payload)
+}
+
+func (a *API) EditMessageText(payload EditMessageTextPayload) error {
+	return a.sendPostRequest("editMessageText", payload)
+}
+
+func (a *API) AnswerCallbackQuery(payload AnswerCallbackQueryPayload) error {
+	return a.sendPostRequest("answerCallbackQuery", payload)
+}
+
+func (a *API) SendPhoto(payload SendPhotoPayload) error {
+	return a.sendPostRequest("sendPhoto", payload)
+}
+
 func (a *API) GetUpdates(offset int) ([]Update, error) {
 	url := fmt.Sprintf("%s/getUpdates?offset=%d&timeout=30", a.baseURL, offset)
 	resp, err := a.httpClient.Get(url)
@@ -57,31 +115,7 @@ func (a *API) GetUpdates(offset int) ([]Update, error) {
 	return updates, nil
 }
 
-func (a *API) SendMessage(payload SendMessagePayload) error {
-	url := fmt.Sprintf("%s/sendMessage", a.baseURL)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal send message payload: %w", err)
-	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create new request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("received non-ok status code (%d): %s", resp.StatusCode, string(body))
-	}
-	log.Printf("successfully sent message to chat id %d", payload.ChatID)
-	return nil
-}
 
 func (a *API) GetChatAdministrators(chatID int64) ([]ChatMember, error) {
 	url := fmt.Sprintf("%s/getChatAdministrators?chat_id=%d", a.baseURL, chatID)
@@ -143,55 +177,3 @@ func (a *API) GetChat(chatID interface{}) (*GetChatResponse, error) {
 	return &chatInfo, nil
 }
 
-// ----- FUNGSI BARU -----
-func (a *API) EditMessageText(payload EditMessageTextPayload) error {
-	url := fmt.Sprintf("%s/editMessageText", a.baseURL)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal edit message payload: %w", err)
-	}
-	// ... (Sisa request HTTP mirip dengan SendMessage)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create new request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send edit message request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("received non-ok status code on edit (%d): %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
-func (a *API) AnswerCallbackQuery(payload AnswerCallbackQueryPayload) error {
-	url := fmt.Sprintf("%s/answerCallbackQuery", a.baseURL)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal answer callback query payload: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create new request for answer callback query: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send answer callback query request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("received non-ok status code on answer callback query (%d): %s", resp.StatusCode, string(body))
-	}
-	return nil
-}

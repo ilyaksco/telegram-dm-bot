@@ -16,7 +16,9 @@ type TriggerRecord struct {
 	ID           int64  `json:"id"` // Tambahkan ID
 	ChannelID    int64  `json:"channel_id"`
 	TriggerText  string `json:"trigger_text"`
+	ResponseType   string `json:"response_type"`
 	ResponseText string `json:"response_text"`
+	ResponseFileID string `json:"response_file_id,omitempty"`
 }
 
 type UserRecord struct {
@@ -33,38 +35,46 @@ func NewSupabaseStorage(url, key string) (*SupabaseStorage, error) {
 	return &SupabaseStorage{client: client}, nil
 }
 
-func (s *SupabaseStorage) Set(channelID int64, trigger, response string) error {
-	lowerTrigger := strings.ToLower(trigger)
-	record := TriggerRecord{
-		ChannelID:    channelID,
-		TriggerText:  lowerTrigger,
-		ResponseText: response,
+func (s *SupabaseStorage) Set(record TriggerRecord) error {
+	data := map[string]interface{}{
+		"channel_id":       record.ChannelID,
+		"trigger_text":     strings.ToLower(record.TriggerText),
+		"response_type":    record.ResponseType,
+		"response_text":    record.ResponseText,
+		"response_file_id": record.ResponseFileID,
 	}
+
+	// Gunakan nama kolom yang unik untuk on_conflict, bukan nama constraint.
 	_, _, err := s.client.From("triggers").
-		Upsert(record, "channel_id,trigger_text", "", "").
+		Upsert(data, "channel_id,trigger_text", "", ""). // <-- PERBAIKAN DI SINI
 		Execute()
+
 	if err != nil {
 		return fmt.Errorf("failed to upsert trigger: %w", err)
 	}
-	log.Printf("successfully stored trigger for channel %d", channelID)
+
+	log.Printf("successfully stored trigger for channel %d", record.ChannelID)
 	return nil
 }
 
-func (s *SupabaseStorage) Get(channelID int64, trigger string) (string, bool, error) {
+func (s *SupabaseStorage) Get(channelID int64, trigger string) (TriggerRecord, bool, error) {
 	lowerTrigger := strings.ToLower(trigger)
 	var results []TriggerRecord
+	var emptyRecord TriggerRecord
+
 	_, err := s.client.From("triggers").
 		Select("*", "0", false).
 		Eq("channel_id", fmt.Sprintf("%d", channelID)).
 		Eq("trigger_text", lowerTrigger).
 		ExecuteTo(&results)
+
 	if err != nil {
-		return "", false, fmt.Errorf("failed to get trigger: %w", err)
+		return emptyRecord, false, fmt.Errorf("failed to get trigger: %w", err)
 	}
 	if len(results) == 0 {
-		return "", false, nil
+		return emptyRecord, false, nil
 	}
-	return results[0].ResponseText, true, nil
+	return results[0], true, nil
 }
 
 // ----- FUNGSI BARU -----
@@ -159,3 +169,25 @@ func (s *SupabaseStorage) GetRegisteredChannels() ([]RegisteredChannel, error) {
 	}
 	return channels, nil
 }
+
+// --- AWAL PERUBAHAN ---
+// Tambahkan fungsi baru ini di akhir file
+func (s *SupabaseStorage) GetTriggerByID(triggerID int64) (TriggerRecord, bool, error) {
+	var results []TriggerRecord
+	var emptyRecord TriggerRecord
+
+	_, err := s.client.From("triggers").
+		Select("*", "0", false).
+		Eq("id", fmt.Sprintf("%d", triggerID)).
+		ExecuteTo(&results)
+
+	if err != nil {
+		return emptyRecord, false, fmt.Errorf("failed to get trigger by id: %w", err)
+	}
+
+	if len(results) == 0 {
+		return emptyRecord, false, nil
+	}
+	return results[0], true, nil
+}
+// --- AKHIR PERUBAHAN ---

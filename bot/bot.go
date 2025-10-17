@@ -16,7 +16,7 @@ type Bot struct {
 	api    *API
 	store  storage.Storage
 	states *StateManager
-	cache  *AdminCache // Tambahkan cache
+	cache  *AdminCache 
 }
 
 func NewBot(cfg *config.Config, store storage.Storage) *Bot {
@@ -24,7 +24,7 @@ func NewBot(cfg *config.Config, store storage.Storage) *Bot {
 		api:    NewAPI(cfg.BotToken),
 		store:  store,
 		states: NewStateManager(),
-		cache:  NewAdminCache(), // Inisialisasi cache
+		cache:  NewAdminCache(), 
 	}
 }
 
@@ -179,10 +179,18 @@ func (b *Bot) sendHelpMenu(chatID int64, lang string) error {
 	text := i18n.GetMessage(lang, "help_main_text", nil)
 	keyboard := InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
-			{{Text: i18n.GetMessage(lang, "help_register_button", nil), CallbackData: "help_register"}},
-			{{Text: i18n.GetMessage(lang, "help_learn_button", nil), CallbackData: "help_learn"}},
-			{{Text: i18n.GetMessage(lang, "help_lang_button", nil), CallbackData: "help_lang"}},
-			{{Text: i18n.GetMessage(lang, "help_cancel_button", nil), CallbackData: "help_cancel"}},
+			{
+				{Text: i18n.GetMessage(lang, "help_register_button", nil), CallbackData: "help_register"},
+				{Text: i18n.GetMessage(lang, "help_learn_button", nil), CallbackData: "help_learn"},
+			},
+			{
+				{Text: i18n.GetMessage(lang, "help_manage_button", nil), CallbackData: "help_manage"},
+				{Text: i18n.GetMessage(lang, "help_formatting_button", nil), CallbackData: "help_formatting"},
+			},
+			{
+				{Text: i18n.GetMessage(lang, "help_lang_button", nil), CallbackData: "help_lang"},
+				{Text: i18n.GetMessage(lang, "help_cancel_button", nil), CallbackData: "help_cancel"},
+			},
 		},
 	}
 	return b.api.SendMessage(SendMessagePayload{
@@ -272,27 +280,45 @@ func (b *Bot) handleCallbackQuery(cb *CallbackQuery) error {
 		return b.api.AnswerCallbackQuery(AnswerCallbackQueryPayload{CallbackQueryID: cb.ID})
 	}
 
-	if strings.HasPrefix(data, "manage_ch_") {
-		parts := strings.Split(data, "_")
-		channelID, _ := strconv.ParseInt(parts[2], 10, 64)
-		page, _ := strconv.Atoi(parts[4])
-
-		return b.sendManagementDashboard(chatID, messageID, lang, channelID, page)
+	if strings.HasPrefix(data, "learn_type_") {
+		responseType := strings.TrimPrefix(data, "learn_type_")
+		state, found := b.states.GetState(userID)
+		if !found { // Sesi hilang, batalkan
+			b.api.EditMessageText(EditMessageTextPayload{ChatID: chatID, MessageID: messageID, Text: "Session expired."})
+			return nil
+		}
+		
+		state.Step = fmt.Sprintf("awaiting_%s", responseType) // misal: "awaiting_sticker"
+		state.ResponseType = responseType
+		b.states.SetState(userID, state)
+		
+		promptTextKey := fmt.Sprintf("learn_awaiting_%s", responseType) // misal: "learn_awaiting_sticker"
+		promptText := i18n.GetMessage(lang, promptTextKey, nil)
+		
+		return b.api.EditMessageText(EditMessageTextPayload{
+			ChatID: chatID, MessageID: messageID, Text: promptText, ParseMode: "Markdown",
+		})
 	}
 
-	if strings.HasPrefix(data, "delete_trigger_") {
+	if strings.HasPrefix(data, "del_prompt_") {
 		parts := strings.Split(data, "_")
 		triggerID, _ := strconv.ParseInt(parts[2], 10, 64)
 		channelID, _ := strconv.ParseInt(parts[4], 10, 64)
 		page, _ := strconv.Atoi(parts[6])
-		triggerText := parts[7] // Kita butuh ini untuk ditampilkan di prompt
 
-		textData := struct{ Trigger string }{Trigger: triggerText}
+		// Ambil info trigger dari database untuk mendapatkan teksnya
+		triggerRecord, found, err := b.store.GetTriggerByID(triggerID)
+		if err != nil || !found {
+			// Handle error jika trigger tidak ditemukan
+			return nil
+		}
+
+		textData := struct{ Trigger string }{Trigger: triggerRecord.TriggerText}
 		text := i18n.GetMessage(lang, "confirm_delete_prompt", textData)
 		keyboard := InlineKeyboardMarkup{
 			InlineKeyboard: [][]InlineKeyboardButton{
 				{
-					{Text: i18n.GetMessage(lang, "confirm_delete_button", nil), CallbackData: fmt.Sprintf("confirm_delete_%d_ch_%d_page_%d_text_%s", triggerID, channelID, page, triggerText)},
+					{Text: i18n.GetMessage(lang, "confirm_delete_button", nil), CallbackData: fmt.Sprintf("del_confirm_%d_ch_%d_pg_%d", triggerID, channelID, page)},
 					{Text: i18n.GetMessage(lang, "cancel_delete_button", nil), CallbackData: fmt.Sprintf("manage_ch_%d_page_%d", channelID, page)},
 				},
 			},
@@ -301,20 +327,20 @@ func (b *Bot) handleCallbackQuery(cb *CallbackQuery) error {
 			ChatID: chatID, MessageID: messageID, Text: text, ParseMode: "Markdown", ReplyMarkup: &keyboard,
 		})
 	}
-
-	if strings.HasPrefix(data, "confirm_delete_") {
+	if strings.HasPrefix(data, "del_confirm_") {
 		parts := strings.Split(data, "_")
 		triggerID, _ := strconv.ParseInt(parts[2], 10, 64)
 		channelID, _ := strconv.ParseInt(parts[4], 10, 64)
 		page, _ := strconv.Atoi(parts[6])
-		triggerText := parts[7]
+
+		// Ambil record dulu untuk dapatkan teksnya sebelum dihapus
+		triggerRecord, found, _ := b.store.GetTriggerByID(triggerID)
 
 		if err := b.store.DeleteTriggerByID(triggerID); err != nil {
 			log.Printf("failed to delete trigger %d: %v", triggerID, err)
-			// Handle error, mungkin dengan alert
-		} else {
-			// Tampilkan notifikasi pop-up
-			alertData := struct{ Trigger string }{Trigger: triggerText}
+		} else if found {
+			// Tampilkan notifikasi pop-up dengan teks trigger
+			alertData := struct{ Trigger string }{Trigger: triggerRecord.TriggerText}
 			alertText := i18n.GetMessage(lang, "delete_success_alert", alertData)
 			b.api.AnswerCallbackQuery(AnswerCallbackQueryPayload{CallbackQueryID: cb.ID, Text: alertText, ShowAlert: true})
 		}
@@ -322,31 +348,49 @@ func (b *Bot) handleCallbackQuery(cb *CallbackQuery) error {
 		return b.sendManagementDashboard(chatID, messageID, lang, channelID, page)
 	}
 
+
+	if strings.HasPrefix(data, "manage_ch_") {
+		parts := strings.Split(data, "_")
+		channelID, _ := strconv.ParseInt(parts[2], 10, 64)
+		page, _ := strconv.Atoi(parts[4])
+		return b.sendManagementDashboard(chatID, messageID, lang, channelID, page)
+	}
+
 	// Router untuk menu Bantuan
 	if strings.HasPrefix(data, "help_") {
 		// Jika "help_main", tampilkan menu utama (dari /start)
 		if data == "help_main" {
-			// Edit pesan /start menjadi menu help
 			text := i18n.GetMessage(lang, "help_main_text", nil)
 			keyboard := InlineKeyboardMarkup{
 				InlineKeyboard: [][]InlineKeyboardButton{
-					{{Text: i18n.GetMessage(lang, "help_register_button", nil), CallbackData: "help_register"}},
-					{{Text: i18n.GetMessage(lang, "help_learn_button", nil), CallbackData: "help_learn"}},
-					{{Text: i18n.GetMessage(lang, "help_lang_button", nil), CallbackData: "help_lang"}},
-					{{Text: i18n.GetMessage(lang, "help_cancel_button", nil), CallbackData: "help_cancel"}},
+					{
+						{Text: i18n.GetMessage(lang, "help_register_button", nil), CallbackData: "help_register"},
+						{Text: i18n.GetMessage(lang, "help_learn_button", nil), CallbackData: "help_learn"},
+					},
+					{
+						{Text: i18n.GetMessage(lang, "help_manage_button", nil), CallbackData: "help_manage"},
+						{Text: i18n.GetMessage(lang, "help_formatting_button", nil), CallbackData: "help_formatting"},
+					},
+					{
+						{Text: i18n.GetMessage(lang, "help_lang_button", nil), CallbackData: "help_lang"},
+						{Text: i18n.GetMessage(lang, "help_cancel_button", nil), CallbackData: "help_cancel"},
+					},
 				},
 			}
 			return b.api.EditMessageText(EditMessageTextPayload{
 				ChatID: chatID, MessageID: messageID, Text: text, ParseMode: "Markdown", ReplyMarkup: &keyboard,
 			})
 		}
-		// Jika tombol fitur spesifik, tampilkan detailnya
 		var helpDetailKey string
 		switch data {
 		case "help_register":
 			helpDetailKey = "help_register_text"
 		case "help_learn":
 			helpDetailKey = "help_learn_text"
+		case "help_manage": // Tambahkan case baru
+			helpDetailKey = "help_manage_text"
+		case "help_formatting": // Tambahkan case baru
+			helpDetailKey = "help_formatting_text"
 		case "help_lang":
 			helpDetailKey = "help_lang_text"
 		case "help_cancel":
@@ -395,7 +439,7 @@ func (b *Bot) handleCallbackQuery(cb *CallbackQuery) error {
 			Step: "awaiting_trigger", ChannelID: channelID,
 		})
 
-		text := "✅ Channel dipilih.\n\nSekarang, kirimkan **kata atau frasa pemicunya**."
+		text := i18n.GetMessage(lang, "learn_channel_selected", nil)
 		return b.api.EditMessageText(EditMessageTextPayload{
 			ChatID: chatID, MessageID: messageID, Text: text, ParseMode: "Markdown",
 		})
@@ -419,8 +463,7 @@ func (b *Bot) handleCallbackQuery(cb *CallbackQuery) error {
 		state, found := b.states.GetState(userID)
 		if !found || state.Step != "awaiting_response" {
 			return b.api.EditMessageText(EditMessageTextPayload{
-				ChatID: chatID, MessageID: messageID, Text: "Sesi Anda telah berakhir. Silakan mulai lagi dengan /learn.",
-			})
+				ChatID: chatID, MessageID: messageID, Text: i18n.GetMessage(lang, "session_expired", nil),			})
 		}
 
 		textData := struct{ Trigger string }{Trigger: state.Trigger}
@@ -504,8 +547,8 @@ func (b *Bot) sendManagementDashboard(chatID int64, messageID int, lang string, 
 		}
 		
 		row := []InlineKeyboardButton{
-			{Text: displayTrigger, CallbackData: "noop"}, // <-- BERI AKSI KOSONG
-			{Text: i18n.GetMessage(lang, "delete_button", nil), CallbackData: fmt.Sprintf("delete_trigger_%d_ch_%d_page_%d_text_%s", trigger.ID, channelID, page, trigger.TriggerText)},
+			{Text: displayTrigger, CallbackData: "noop"},
+			{Text: i18n.GetMessage(lang, "delete_button", nil), CallbackData: fmt.Sprintf("del_prompt_%d_ch_%d_pg_%d", trigger.ID, channelID, page)},
 		}
 		keyboard = append(keyboard, row)
 	}
@@ -522,6 +565,11 @@ func (b *Bot) sendManagementDashboard(chatID int64, messageID int, lang string, 
 		keyboard = append(keyboard, navRow)
 	}
 
+	backToHelpRow := []InlineKeyboardButton{
+		{Text: i18n.GetMessage(lang, "back_to_main_menu_button", nil), CallbackData: "help_main"},
+	}
+	keyboard = append(keyboard, backToHelpRow)
+	
 	return b.api.EditMessageText(EditMessageTextPayload{
 		ChatID: chatID, MessageID: messageID, Text: textBuilder.String(), ParseMode: "Markdown", ReplyMarkup: &InlineKeyboardMarkup{InlineKeyboard: keyboard},
 	})
@@ -538,7 +586,7 @@ func (b *Bot) handleLearnCommand(msg *Message, lang string) error {
 	if found {
 		log.Printf("cache hit for user %d", userID)
 		// Jika ditemukan, langsung gunakan data dari cache (super cepat)
-		return b.sendChannelSelection(chatID, cachedChannels)
+		return b.sendChannelSelection(chatID, cachedChannels, lang)
 	}
 
 	log.Printf("cache miss for user %d, performing full check", userID)
@@ -566,11 +614,11 @@ func (b *Bot) handleLearnCommand(msg *Message, lang string) error {
 		return b.api.SendMessage(SendMessagePayload{ChatID: chatID, Text: text, ParseMode: "Markdown"})
 	}
 
-	return b.sendChannelSelection(chatID, userAdminChannels)
+	return b.sendChannelSelection(chatID, userAdminChannels, lang)
 }
 
 // Fungsi helper baru untuk menghindari duplikasi kode
-func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredChannel) error {
+func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredChannel, lang string) error {
 	var keyboard [][]InlineKeyboardButton
 	for _, ch := range channels {
 		button := InlineKeyboardButton{
@@ -580,7 +628,8 @@ func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredCh
 		keyboard = append(keyboard, []InlineKeyboardButton{button})
 	}
 
-	text := "Silakan pilih channel yang ingin Anda ajari:"
+	text := i18n.GetMessage(lang, "learn_prompt_channel", nil)
+	
 	return b.api.SendMessage(SendMessagePayload{
 		ChatID: chatID,
 		Text:   text,
@@ -594,46 +643,132 @@ func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredCh
 func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) error {
 	userID := msg.From.ID
 
-	if state.Step == "awaiting_trigger" {
+	switch state.Step {
+	case "awaiting_trigger":
 		state.Trigger = msg.Text
-		state.Step = "awaiting_response"
+		state.Step = "awaiting_response_type"
 		b.states.SetState(userID, state)
 
 		textData := struct{ Trigger string }{Trigger: msg.Text}
-		text := i18n.GetMessage(lang, "learn_awaiting_response", textData)
-		
-		// Buat tombol bantuan
-		helpButton := InlineKeyboardButton{
-			Text:         i18n.GetMessage(lang, "placeholder_button", nil),
-			CallbackData: "show_placeholder_help",
-		}
+		text := i18n.GetMessage(lang, "learn_awaiting_response_type", textData)
 		keyboard := InlineKeyboardMarkup{
-			InlineKeyboard: [][]InlineKeyboardButton{{helpButton}},
+			InlineKeyboard: [][]InlineKeyboardButton{
+				{
+					{Text: i18n.GetMessage(lang, "reply_type_text", nil), CallbackData: "learn_type_text"},
+					{Text: i18n.GetMessage(lang, "reply_type_photo", nil), CallbackData: "learn_type_photo"},
+					{Text: i18n.GetMessage(lang, "reply_type_sticker", nil), CallbackData: "learn_type_sticker"},
+				},
+				{
+					{Text: i18n.GetMessage(lang, "reply_type_document", nil), CallbackData: "learn_type_document"},
+					{Text: i18n.GetMessage(lang, "reply_type_gif", nil), CallbackData: "learn_type_animation"},
+				},
+				{
+					{Text: i18n.GetMessage(lang, "reply_type_audio", nil), CallbackData: "learn_type_audio"},
+				},
+			},
 		}
-
 		return b.api.SendMessage(SendMessagePayload{
-			ChatID:      msg.Chat.ID,
-			Text:        text,
-			ParseMode:   "Markdown",
-			ReplyMarkup: &keyboard,
+			ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown", ReplyMarkup: &keyboard,
 		})
-	}
 
-	if state.Step == "awaiting_response" {
-		response := msg.Text
-		err := b.store.Set(state.ChannelID, state.Trigger, response)
-		b.states.ClearState(userID) // Sesi selesai
+	case "awaiting_text":
+		record := storage.TriggerRecord{
+			ChannelID:    state.ChannelID,
+			TriggerText:  state.Trigger,
+			ResponseType: "text",
+			ResponseText: msg.Text,
+		}
+		return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
 
-		if err != nil {
-			log.Printf("failed to save final trigger: %v", err)
-			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: "Terjadi kesalahan saat menyimpan."})
+	case "awaiting_photo":
+		if msg.Photo != nil && len(msg.Photo) > 0 {
+			bestPhoto := msg.Photo[0]
+			for _, photo := range msg.Photo {
+				if photo.FileSize > bestPhoto.FileSize {
+					bestPhoto = photo
+				}
+			}
+			record := storage.TriggerRecord{
+				ChannelID:      state.ChannelID,
+				TriggerText:    state.Trigger,
+				ResponseType:   "photo",
+				ResponseFileID: bestPhoto.FileID,
+				ResponseText:   msg.Caption, // <-- PERBAIKI DARI msg.Text MENJADI msg.Caption
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		}
+	
+	case "awaiting_sticker":
+		if msg.Sticker != nil {
+			record := storage.TriggerRecord{
+				ChannelID:      state.ChannelID,
+				TriggerText:    state.Trigger,
+				ResponseType:   "sticker",
+				ResponseFileID: msg.Sticker.FileID,
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
 		}
 
-		text := fmt.Sprintf("✅ **Berhasil!**\n\nPemicu: `%s`\nRespon: `%s`\n\nTelah disimpan.", state.Trigger, response)
-		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+	case "awaiting_document":
+		if msg.Document != nil {
+			record := storage.TriggerRecord{
+				ChannelID:      state.ChannelID,
+				TriggerText:    state.Trigger,
+				ResponseType:   "document",
+				ResponseFileID: msg.Document.FileID,
+				ResponseText:   msg.Caption, 
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		}
+
+	case "awaiting_animation":
+		if msg.Animation != nil {
+			record := storage.TriggerRecord{
+				ChannelID:      state.ChannelID,
+				TriggerText:    state.Trigger,
+				ResponseType:   "animation",
+				ResponseFileID: msg.Animation.FileID,
+				ResponseText:   msg.Caption, // Caption
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		}
+
+	case "awaiting_audio":
+		if msg.Audio != nil {
+			record := storage.TriggerRecord{
+				ChannelID:      state.ChannelID,
+				TriggerText:    state.Trigger,
+				ResponseType:   "audio",
+				ResponseFileID: msg.Audio.FileID,
+				ResponseText:   msg.Caption, // Caption
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		}
+	
+	
 	}
+
+
+	
 
 	return nil
+
+	
+}
+
+// Fungsi helper baru untuk menyelesaikan sesi
+func (b *Bot) finalizeLearnSession(userID, chatID int64, lang string, record storage.TriggerRecord) error {
+	if err := b.store.Set(record); err != nil {
+		log.Printf("failed to save final trigger: %v", err)
+		b.api.SendMessage(SendMessagePayload{ChatID: chatID, Text: "An error occurred."})
+		return err
+	}
+	
+	b.states.ClearState(userID)
+	
+	textData := struct{ Trigger string }{Trigger: record.TriggerText}
+	text := i18n.GetMessage(lang, "learn_success", textData)
+	return b.api.SendMessage(SendMessagePayload{ChatID: chatID, Text: text, ParseMode: "Markdown"})
 }
 
 // ... (handleAutoReply, isUserAdmin, dll tidak berubah)
@@ -649,51 +784,60 @@ func (b *Bot) isUserAdmin(chatID, userID int64) (bool, error) {
 	}
 	return false, nil
 }
+
+// --- AWAL PERUBAHAN ---
+// FUNGSI LENGKAP YANG DIPERBARUI
 func (b *Bot) handleAutoReply(msg *Message) error {
 	var searchID int64
-	var response string
-	var found bool
-	var err error
-
-	// 1. Dapatkan info detail dari DM chat untuk mencari parent_chat
 	dmChatInfo, err := b.api.GetChat(msg.Chat.ID)
 	if err != nil {
 		log.Printf("could not get detailed info for DM chat %d: %v", msg.Chat.ID, err)
-		return nil // Gagal mendapat info, tidak bisa lanjut
+		return nil
 	}
-
-	// 2. Tentukan ID yang akan digunakan untuk mencari di database
 	if dmChatInfo.ParentChat != nil && dmChatInfo.ParentChat.ID != 0 {
 		searchID = dmChatInfo.ParentChat.ID
-		log.Printf("DM chat %d belongs to parent channel %d. searching with parent ID.", msg.Chat.ID, searchID)
 	} else {
 		searchID = msg.Chat.ID
-		log.Printf("could not find parent channel for DM chat %d. searching with its own ID.", searchID)
 	}
 
-	// 3. Cari di Supabase menggunakan ID yang sudah ditentukan
-	response, found, err = b.store.Get(searchID, msg.Text)
-	if err != nil {
-		log.Printf("error retrieving trigger from storage for searchID %d: %v", searchID, err)
+	record, found, err := b.store.Get(searchID, msg.Text)
+	if err != nil || !found {
 		return err
 	}
 
-	if !found {
-		return nil // Tidak ada trigger yang cocok
+	log.Printf("found match for trigger '%s'. replying with type '%s'", msg.Text, record.ResponseType)
+
+	topicID := msg.DirectMessagesTopic.TopicID
+
+	// Ganti switch lama dengan yang ini
+	switch record.ResponseType {
+	case "text":
+		finalText := strings.Replace(record.ResponseText, "{{user_first_name}}", msg.From.FirstName, -1)
+		return b.api.SendMessage(SendMessagePayload{
+			ChatID: msg.Chat.ID, Text: finalText, ParseMode: "Markdown", DirectMessagesTopicID: topicID,
+		})
+	case "photo":
+		return b.api.SendPhoto(SendPhotoPayload{
+			ChatID: msg.Chat.ID, Photo: record.ResponseFileID, Caption: record.ResponseText, ParseMode: "Markdown", DirectMessagesTopicID: topicID,
+		})
+	case "sticker":
+		return b.api.SendSticker(SendStickerPayload{
+			ChatID: msg.Chat.ID, Sticker: record.ResponseFileID, DirectMessagesTopicID: topicID,
+		})
+	case "document":
+		return b.api.SendDocument(SendDocumentPayload{
+			ChatID: msg.Chat.ID, Document: record.ResponseFileID, Caption: record.ResponseText, DirectMessagesTopicID: topicID,
+		})
+	case "animation":
+		return b.api.SendAnimation(SendAnimationPayload{
+			ChatID: msg.Chat.ID, Animation: record.ResponseFileID, Caption: record.ResponseText, DirectMessagesTopicID: topicID,
+		})
+	case "audio":
+		return b.api.SendAudio(SendAudioPayload{
+			ChatID: msg.Chat.ID, Audio: record.ResponseFileID, Caption: record.ResponseText, DirectMessagesTopicID: topicID,
+		})
 	}
 
-	userFirstName := msg.From.FirstName
-	// Ganti placeholder di dalam teks balasan
-	finalResponse := strings.Replace(response, "{{user_first_name}}", userFirstName, -1)
-	// ---------------------------------------------------
-
-	// 4. Kirim balasan
-	log.Printf("found match for trigger '%s' using searchID %d. replying to topic %d in chat %d", msg.Text, searchID, msg.DirectMessagesTopic.TopicID, msg.Chat.ID) // <-- PERBAIKAN DI SINI
-	return b.api.SendMessage(SendMessagePayload{
-		ChatID:                msg.Chat.ID,
-		Text:                  finalResponse, // Kirim balasan yang sudah diproses
-		DirectMessagesTopicID: msg.DirectMessagesTopic.TopicID, // <-- DAN DI SINI
-		ParseMode:             "Markdown",
-	})
+	return nil
 }
-
+// --- AKHIR PERUBAHAN ---

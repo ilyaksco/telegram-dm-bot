@@ -1,3 +1,5 @@
+// --- AWAL PERUBAHAN ---
+// FUNGSI LENGKAP YANG DIPERBARUI
 package storage
 
 type RegisteredChannel struct {
@@ -6,14 +8,17 @@ type RegisteredChannel struct {
 }
 
 type Storage interface {
-	Set(channelID int64, trigger, response string) error
-	Get(channelID int64, trigger string) (string, bool, error)
-	// GetAllTriggers tidak kita butuhkan lagi, kita ganti dengan yang lebih spesifik
+	// BEFORE
+	// Set(channelID int64, trigger, response string) error
+	// AFTER
+	Set(record TriggerRecord) error
+	Get(channelID int64, trigger string) (TriggerRecord, bool, error)
 	GetTriggersByChannel(channelID int64) ([]TriggerRecord, error)
+	GetTriggerByID(triggerID int64) (TriggerRecord, bool, error) // <-- TAMBAHKAN FUNGSI BARU INI
 	DeleteTriggerByID(triggerID int64) error
 	SetUserLanguage(userID int64, langCode string) error
 	GetUserLanguage(userID int64) (string, bool, error)
 	RegisterChannel(channelID int64, title string, userID int64) error
 	GetRegisteredChannels() ([]RegisteredChannel, error)
-
 }
+// --- AKHIR PERUBAHAN ---
