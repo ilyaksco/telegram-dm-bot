@@ -233,10 +233,67 @@ func (b *Bot) handleLangCommand(msg *Message, lang string) error {
 
 // --- AWAL PERUBAHAN ---
 // FUNGSI BARU
+// --- AWAL PERUBAHAN ---
+// FUNGSI LENGKAP YANG DIPERBARUI
 func (b *Bot) handleRegisterCommand(msg *Message, lang string) error {
-	b.states.SetState(msg.From.ID, &UserState{Step: "awaiting_registration_forward"})
-	text := i18n.GetMessage(lang, "register_prompt_forward", nil)
-	return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+	parts := strings.Split(msg.Text, " ")
+
+	if len(parts) == 1 {
+		b.states.SetState(msg.From.ID, &UserState{Step: "awaiting_registration_forward"})
+		text := i18n.GetMessage(lang, "register_prompt_forward", nil)
+		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+	}
+
+	if len(parts) == 2 {
+		var chatIdentifier interface{}
+		arg := parts[1]
+
+		if chatID, err := strconv.ParseInt(arg, 10, 64); err == nil {
+			chatIdentifier = chatID
+		} else if strings.HasPrefix(arg, "@") {
+			chatIdentifier = arg
+		} else {
+			text := i18n.GetMessage(lang, "register_usage", nil)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+
+		channelInfo, err := b.api.GetChat(chatIdentifier)
+		if err != nil {
+			log.Printf("register failed for %v: could not get chat info: %v", chatIdentifier, err)
+			text := i18n.GetMessage(lang, "register_fail_not_found", nil)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+
+		isAdmin, err := b.isUserAdmin(channelInfo.ID, msg.From.ID)
+		if err != nil {
+			log.Printf("error checking admin status for %v: %v", chatIdentifier, err)
+			errorText := fmt.Sprintf("❌ Failed to verify admin status. Make sure I am an administrator in '%s' and try again in a few seconds. (API Error: %v)", channelInfo.Title, err)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: errorText})
+		}
+		if !isAdmin {
+			log.Printf("register failed for %v: user %d is not admin.", chatIdentifier, msg.From.ID)
+			text := i18n.GetMessage(lang, "register_fail_not_admin", nil)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+
+		if err := b.store.RegisterChannel(channelInfo.ID, channelInfo.Title, msg.From.ID); err != nil {
+			log.Printf("register failed for %v: could not save to storage: %v", chatIdentifier, err)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: "An internal error occurred."})
+		}
+
+		// BEFORE
+		// b.cache.Set(msg.From.ID, nil) // Invalidate cache after successful direct registration
+
+		// AFTER
+		b.cache.Invalidate(msg.From.ID) // Hapus cache setelah registrasi berhasil
+
+		data := struct{ ChannelTitle string }{ChannelTitle: channelInfo.Title}
+		text := i18n.GetMessage(lang, "register_success", data)
+		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+	}
+
+	text := i18n.GetMessage(lang, "register_usage", nil)
+	return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 }
 // --- AKHIR PERUBAHAN ---
 
@@ -643,14 +700,15 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 		}
 
 		channelInfo := msg.ForwardFromChat
-		isAdmin, err := b.isUserAdmin(channelInfo.ID, userID)
+		isAdmin, err := b.isUserAdmin(channelInfo.ID, userID) // userID sudah didefinisikan di awal switch
+
 		if err != nil {
-			log.Printf("error checking admin status for %d: %v", channelInfo.ID, err)
-			text := i18n.GetMessage(lang, "register_fail_not_admin", nil) // Kemungkinan bot bukan anggota
-			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+			log.Printf("error checking admin status for channel %d user %d: %v", channelInfo.ID, userID, err)
+			errorText := fmt.Sprintf("❌ Failed to verify admin status. Make sure I am an administrator in '%s' and try again in a few seconds. (API Error: %v)", channelInfo.Title, err)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: errorText})
 		}
 		if !isAdmin {
-			log.Printf("register failed for %d: user %d is not admin.", channelInfo.ID, userID)
+			log.Printf("register failed for channel %d: user %d is not admin.", channelInfo.ID, userID)
 			text := i18n.GetMessage(lang, "register_fail_not_admin", nil)
 			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
@@ -660,13 +718,16 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: "An internal error occurred."})
 		}
 
-		// Hapus cache agar /learn selanjutnya mengambil data baru
-		b.cache.Set(userID, nil)
+		// BEFORE
+		// b.cache.Set(userID, nil)
+		// AFTER
+		b.cache.Invalidate(userID) // Hapus cache setelah registrasi berhasil
 		b.states.ClearState(userID)
 
 		data := struct{ ChannelTitle string }{ChannelTitle: channelInfo.Title}
 		text := i18n.GetMessage(lang, "register_success", data)
 		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+// --- AKHIR PERUBAHAN ---
 
 	case "awaiting_trigger":
 		state.Trigger = msg.Text

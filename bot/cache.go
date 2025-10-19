@@ -3,6 +3,7 @@ package bot
 import (
 	"sync"
 	"time"
+	"log"
 
 	"telegram-dm-bot/storage"
 )
@@ -39,6 +40,10 @@ func (c *AdminCache) Get(userID int64) ([]storage.RegisteredChannel, bool) {
 		return nil, false // Cache sudah kedaluwarsa
 	}
 
+	if entry.channels == nil {
+		return nil, false 
+	}
+
 	return entry.channels, true // Cache valid
 }
 
@@ -53,3 +58,10 @@ func (c *AdminCache) Set(userID int64, channels []storage.RegisteredChannel) {
 	}
 }
 // --- AKHIR PERUBAHAN ---
+
+func (c *AdminCache) Invalidate(userID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.data, userID)
+	log.Printf("cache invalidated for user %d", userID)
+}
