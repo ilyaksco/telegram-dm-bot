@@ -177,3 +177,36 @@ func (a *API) GetChat(chatID interface{}) (*GetChatResponse, error) {
 	return &chatInfo, nil
 }
 
+// --- AWAL PERUBAHAN ---
+// Tambahkan fungsi baru ini bersama fungsi "Get" lainnya
+
+func (a *API) GetMe() (*User, error) {
+	url := fmt.Sprintf("%s/getMe", a.baseURL)
+	resp, err := a.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call getMe: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read getMe response body: %w", err)
+	}
+
+	var apiResp GetMeResponse // Gunakan struct GetMeResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		// Coba unmarshal sebagai error biasa jika getMe gagal
+		var baseResp ApiResponse
+		if json.Unmarshal(body, &baseResp) == nil && !baseResp.Ok {
+			return nil, fmt.Errorf("telegram API error on getMe: %s", string(body))
+		}
+		return nil, fmt.Errorf("failed to unmarshal getMe response: %w", err)
+	}
+
+	if !apiResp.Ok {
+		return nil, fmt.Errorf("telegram API returned not ok on getMe: %s", string(body))
+	}
+
+	return &apiResp.Result, nil
+}
+// --- AKHIR PERUBAHAN ---

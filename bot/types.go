@@ -15,7 +15,8 @@ type Message struct {
 	Chat                Chat                `json:"chat"`
 	Date                int                 `json:"date"`
 	Text                string              `json:"text"`
-	Caption             string              `json:"caption,omitempty"` // <-- TAMBAHKAN INI
+	Caption             string              `json:"caption,omitempty"`
+	ForwardFromChat     *Chat               `json:"forward_from_chat,omitempty"` // <-- TAMBAHKAN INI // <-- TAMBAHKAN INI
 	Photo               []*PhotoSize        `json:"photo,omitempty"` // Tambahkan ini
 	Sticker             *Sticker            `json:"sticker,omitempty"`
 	Document            *Document           `json:"document,omitempty"`
@@ -78,6 +79,7 @@ type CallbackQuery struct {
 type InlineKeyboardButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data"`
+	URL          string `json:"url,omitempty"`          // <-- TAMBAHKAN FIELD INI (lowercase json tag)
 }
 
 type InlineKeyboardMarkup struct {
@@ -161,4 +163,9 @@ type SendPhotoPayload struct {
 	Caption               string `json:"caption,omitempty"`
 	ParseMode             string `json:"parse_mode,omitempty"`
 	DirectMessagesTopicID int    `json:"direct_messages_topic_id,omitempty"`
+}
+
+type GetMeResponse struct {
+	Ok     bool   `json:"ok"`
+	Result User   `json:"result"` // Kita bisa gunakan struct User yang sudah ada
 }

@@ -17,14 +17,24 @@ type Bot struct {
 	store  storage.Storage
 	states *StateManager
 	cache  *AdminCache 
+	botUsername string // <-- Tambahkan field baru untuk menyimpan username
 }
 
 func NewBot(cfg *config.Config, store storage.Storage) *Bot {
+	api := NewAPI(cfg.BotToken)
+
+	// 1. Declare botInfo by calling api.GetMe()
+	botInfo, err := api.GetMe()
+	if err != nil {
+		// If getMe fails, stop the bot immediately (Fatal error)
+		log.Fatalf("FATAL: Could not get bot info (getMe failed): %v", err)
+	}
 	return &Bot{
 		api:    NewAPI(cfg.BotToken),
 		store:  store,
 		states: NewStateManager(),
 		cache:  NewAdminCache(), 
+		botUsername: botInfo.Username, // <-- Simpan username di sini
 	}
 }
 
@@ -117,11 +127,15 @@ func (b *Bot) handleMessage(msg *Message) error {
 
 func (b *Bot) handleStartCommand(msg *Message, lang string) error {
 	text := i18n.GetMessage(lang, "start_message", nil)
+	addToChannelURL := fmt.Sprintf("https://t.me/%s?startgroup=start&admin=post_messages", b.botUsername)
 	keyboard := InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
 				{Text: i18n.GetMessage(lang, "help_button", nil), CallbackData: "help_main"},
 				{Text: i18n.GetMessage(lang, "language_button", nil), CallbackData: "lang_prompt"},
+			},
+			{ // Baris pertama
+				{Text: i18n.GetMessage(lang, "add_to_channel_button", nil), URL: addToChannelURL}, // Tombol URL baru
 			},
 		},
 	}
@@ -207,6 +221,7 @@ func (b *Bot) handleLangCommand(msg *Message, lang string) error {
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{{Text: "🇬🇧 English", CallbackData: "lang_en"}},
 			{{Text: "🇮🇩 Indonesia", CallbackData: "lang_id"}},
+			{{Text: "🇷🇺 Русский", CallbackData: "lang_ru"}},
 		},
 	}
 	return b.api.SendMessage(SendMessagePayload{
@@ -219,34 +234,8 @@ func (b *Bot) handleLangCommand(msg *Message, lang string) error {
 // --- AWAL PERUBAHAN ---
 // FUNGSI BARU
 func (b *Bot) handleRegisterCommand(msg *Message, lang string) error {
-	parts := strings.Split(msg.Text, " ")
-	if len(parts) != 2 || !strings.HasPrefix(parts[1], "@") {
-		text := i18n.GetMessage(lang, "register_usage", nil)
-		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
-	}
-
-	channelUsername := parts[1]
-	channelInfo, err := b.api.GetChat(channelUsername)
-	if err != nil {
-		log.Printf("register failed for %s: could not get chat info: %v", channelUsername, err)
-		text := i18n.GetMessage(lang, "register_fail", nil)
-		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
-	}
-
-	isAdmin, err := b.isUserAdmin(channelInfo.ID, msg.From.ID)
-	if err != nil || !isAdmin {
-		log.Printf("register failed for %s: user %d is not admin or error occurred: %v", channelUsername, msg.From.ID, err)
-		text := i18n.GetMessage(lang, "register_fail", nil)
-		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
-	}
-
-	if err := b.store.RegisterChannel(channelInfo.ID, channelInfo.Title, msg.From.ID); err != nil {
-		log.Printf("register failed for %s: could not save to storage: %v", channelUsername, err)
-		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: "An internal error occurred."})
-	}
-
-	data := struct{ ChannelTitle string }{ChannelTitle: channelInfo.Title}
-	text := i18n.GetMessage(lang, "register_success", data)
+	b.states.SetState(msg.From.ID, &UserState{Step: "awaiting_registration_forward"})
+	text := i18n.GetMessage(lang, "register_prompt_forward", nil)
 	return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
 }
 // --- AKHIR PERUBAHAN ---
@@ -619,6 +608,11 @@ func (b *Bot) handleLearnCommand(msg *Message, lang string) error {
 
 // Fungsi helper baru untuk menghindari duplikasi kode
 func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredChannel, lang string) error {
+	if len(channels) == 0 {
+		text := i18n.GetMessage(lang, "learn_no_channels_found", nil)
+		return b.api.SendMessage(SendMessagePayload{ChatID: chatID, Text: text, ParseMode: "Markdown"})
+	}
+	
 	var keyboard [][]InlineKeyboardButton
 	for _, ch := range channels {
 		button := InlineKeyboardButton{
@@ -627,15 +621,12 @@ func (b *Bot) sendChannelSelection(chatID int64, channels []storage.RegisteredCh
 		}
 		keyboard = append(keyboard, []InlineKeyboardButton{button})
 	}
-
 	text := i18n.GetMessage(lang, "learn_prompt_channel", nil)
-	
+
 	return b.api.SendMessage(SendMessagePayload{
-		ChatID: chatID,
-		Text:   text,
-		ReplyMarkup: &InlineKeyboardMarkup{
-			InlineKeyboard: keyboard,
-		},
+		ChatID:      chatID,
+		Text:        text,
+		ReplyMarkup: &InlineKeyboardMarkup{InlineKeyboard: keyboard},
 	})
 }
 
@@ -644,6 +635,39 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 	userID := msg.From.ID
 
 	switch state.Step {
+
+	case "awaiting_registration_forward":
+		if msg.ForwardFromChat == nil {
+			text := i18n.GetMessage(lang, "register_invalid_forward", nil)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+
+		channelInfo := msg.ForwardFromChat
+		isAdmin, err := b.isUserAdmin(channelInfo.ID, userID)
+		if err != nil {
+			log.Printf("error checking admin status for %d: %v", channelInfo.ID, err)
+			text := i18n.GetMessage(lang, "register_fail_not_admin", nil) // Kemungkinan bot bukan anggota
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+		if !isAdmin {
+			log.Printf("register failed for %d: user %d is not admin.", channelInfo.ID, userID)
+			text := i18n.GetMessage(lang, "register_fail_not_admin", nil)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
+		}
+
+		if err := b.store.RegisterChannel(channelInfo.ID, channelInfo.Title, userID); err != nil {
+			log.Printf("register failed for %d: could not save to storage: %v", channelInfo.ID, err)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: "An internal error occurred."})
+		}
+
+		// Hapus cache agar /learn selanjutnya mengambil data baru
+		b.cache.Set(userID, nil)
+		b.states.ClearState(userID)
+
+		data := struct{ ChannelTitle string }{ChannelTitle: channelInfo.Title}
+		text := i18n.GetMessage(lang, "register_success", data)
+		return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text, ParseMode: "Markdown"})
+
 	case "awaiting_trigger":
 		state.Trigger = msg.Text
 		state.Step = "awaiting_response_type"
@@ -672,13 +696,22 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 		})
 
 	case "awaiting_text":
-		record := storage.TriggerRecord{
-			ChannelID:    state.ChannelID,
-			TriggerText:  state.Trigger,
-			ResponseType: "text",
-			ResponseText: msg.Text,
+		// BEFORE
+		// (Tidak ada penanganan error)
+		// AFTER
+		if msg.Text != "" {
+			record := storage.TriggerRecord{
+				ChannelID:    state.ChannelID,
+				TriggerText:  state.Trigger,
+				ResponseType: "text",
+				ResponseText: msg.Text,
+			}
+			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"text"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
-		return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
 
 	case "awaiting_photo":
 		if msg.Photo != nil && len(msg.Photo) > 0 {
@@ -693,11 +726,15 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 				TriggerText:    state.Trigger,
 				ResponseType:   "photo",
 				ResponseFileID: bestPhoto.FileID,
-				ResponseText:   msg.Caption, // <-- PERBAIKI DARI msg.Text MENJADI msg.Caption
+				ResponseText:   msg.Caption,
 			}
 			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"image"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
-	
+
 	case "awaiting_sticker":
 		if msg.Sticker != nil {
 			record := storage.TriggerRecord{
@@ -707,8 +744,13 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 				ResponseFileID: msg.Sticker.FileID,
 			}
 			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"sticker"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
-
+		
+	// Lakukan hal yang sama untuk semua jenis media lainnya...
 	case "awaiting_document":
 		if msg.Document != nil {
 			record := storage.TriggerRecord{
@@ -716,9 +758,13 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 				TriggerText:    state.Trigger,
 				ResponseType:   "document",
 				ResponseFileID: msg.Document.FileID,
-				ResponseText:   msg.Caption, 
+				ResponseText:   msg.Caption,
 			}
 			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"document"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
 
 	case "awaiting_animation":
@@ -728,9 +774,13 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 				TriggerText:    state.Trigger,
 				ResponseType:   "animation",
 				ResponseFileID: msg.Animation.FileID,
-				ResponseText:   msg.Caption, // Caption
+				ResponseText:   msg.Caption,
 			}
 			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"GIF"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
 
 	case "awaiting_audio":
@@ -740,17 +790,15 @@ func (b *Bot) handleSessionMessage(msg *Message, state *UserState, lang string) 
 				TriggerText:    state.Trigger,
 				ResponseType:   "audio",
 				ResponseFileID: msg.Audio.FileID,
-				ResponseText:   msg.Caption, // Caption
+				ResponseText:   msg.Caption,
 			}
 			return b.finalizeLearnSession(userID, msg.Chat.ID, lang, record)
+		} else {
+			data := struct{ ExpectedType string }{"audio file"}
+			text := i18n.GetMessage(lang, "learn_wrong_file_type", data)
+			return b.api.SendMessage(SendMessagePayload{ChatID: msg.Chat.ID, Text: text})
 		}
-	
-	
 	}
-
-
-	
-
 	return nil
 
 	

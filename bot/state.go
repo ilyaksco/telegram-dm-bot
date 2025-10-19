@@ -5,8 +5,8 @@ import (
 )
 
 type UserState struct {
-	Step         string // "awaiting_trigger", "awaiting_response_type", "awaiting_text", "awaiting_sticker", dll.
-	ChannelID    int64
+	Step         string // "awaiting_registration_forward", "awaiting_trigger", dll.	ChannelID    int64
+	ChannelID    int64  // <-- TAMBAHKAN KEMBALI FIELD INI
 	ChannelTitle string
 	Trigger      string
 	ResponseType string
