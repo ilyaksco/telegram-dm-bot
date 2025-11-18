@@ -1,5 +1,5 @@
 {
-  "start_message": "👋 **Welcome to the DM Auto-Reply Bot!**\n\nI'm here to help you automatically reply to messages in your channel's Direct Messages. You, as the admin, can teach me what to say.\n\nUse the buttons below to get started.",
+"start_message": "👋 *Welcome to the DM Auto-Reply Bot!*\n\nI'm here to help you automatically reply to messages in your channel's Direct Messages. You, as the admin, can teach me what to say.\n\nUse the buttons below to get started.\n\n```\n💡 FYI: On August 15, Telegram launched the Direct Message in Channel feature.\nTo enable it, open your channel, go to Channel Settings → Direct Message → Enable “Allow Direct Message.”\n```",
   "help_button": "📚 Help",
   "language_button": "🌐 Language",
   "help_main_text": "📚 *Help Center*\n\nPlease select a feature below to see a detailed explanation:",
